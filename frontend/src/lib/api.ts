@@ -135,7 +135,10 @@ const resolveMockRequest = async (path: string, options: RequestInit): Promise<a
   // Auth routes
   if (path === '/auth/login') {
     if (body.email === 'admin@whatsaas.com' && body.password === 'admin123') {
-      return { accessToken: mockData.token, user: mockData.user };
+      return { accessToken: mockData.token, user: { ...mockData.user, email: 'admin@whatsaas.com', name: 'SaaS SuperAdmin', role: 'SUPERADMIN' } };
+    }
+    if (body.email === 'demo@whatsaas.com' && body.password === 'demo123') {
+      return { accessToken: mockData.token, user: { ...mockData.user, email: 'demo@whatsaas.com', name: 'Demo Business Owner', role: 'OWNER' } };
     }
     // Simulate register override or default back
     return {

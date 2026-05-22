@@ -71,43 +71,58 @@ The database utilizes PostgreSQL with a multi-tenant structure mapping tables by
 
 ### Prerequisites
 - Node.js 18+
-- Docker & Docker Compose
+- Docker & Docker Compose (Optional: fallback setup is available)
 
-### Step 1: Clone and Set Up Workspace
-Configure the backend and frontend environment files:
+### Step 1: Install All Dependencies
+From the monorepo root directory, run the bootstrap command to install all frontend and backend dependencies:
+```bash
+npm run install:all
+```
+
+### Step 2: Configure Environment Variables
 - Copy `backend/.env.example` to `backend/.env`
 - Copy `frontend/.env.example` to `frontend/.env`
 
-### Step 2: Spin Up Databases (Docker)
-Launch PostgreSQL and Redis containers:
+### Step 3: Set Up Database (Optional)
+If you have Docker installed and want to run a local database/Redis setup:
 ```bash
+# Spin up local containers
 docker-compose up -d
-```
 
-### Step 3: Set Up NestJS Backend & Database Migrations
-Open a new shell, navigate to the `backend` directory, and initialize:
-```bash
+# Initialize migrations and seed data
 cd backend
-npm install
 npx prisma migrate dev --name init
-npx prisma db seed
-npm run start:dev
+npm run prisma:seed
+cd ..
 ```
-*Note: Seeding creates default user accounts, lead stages, default billing plans, and AI prompts.*
-- **Developer Login Credentials**: `admin@whatsaas.com` / `admin123`
+*Note: The seeding script automatically preloads the platform with mock data and demo accounts.*
 
-### Step 4: Launch Next.js Frontend
-Open a separate shell, navigate to the `frontend` directory:
+### Step 4: Start Frontend and Backend Concurrently
+Run the monorepo concurrent orchestrator command:
 ```bash
-cd frontend
-npm install
 npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## 4. Evaluation in Offline Sandbox Mode
+## 4. User Access Credentials
+
+When logging into the platform dashboard, you can use either of the following pre-configured credentials:
+
+1. **Demo Business Account** (Recommended)
+   - **Email**: `demo@whatsaas.com`
+   - **Password**: `demo123`
+   - **Details**: Pre-loaded with rich mock CRM pipeline contacts, multi-turn active AI chat logs, previous campaign broadcasts, and custom automation workflows.
+   
+2. **SuperAdmin Account**
+   - **Email**: `admin@whatsaas.com`
+   - **Password**: `admin123`
+   - **Details**: Access to general dashboard metrics, service performance, audit logs, and user listing monitors.
+
+---
+
+## 5. Evaluation in Offline Sandbox Mode
 
 The frontend is built with a stateful sandbox routing module (`frontend/src/lib/api.ts`). If the NestJS backend server is not running or is offline:
 1. Network requests are intercepted and routed to an in-memory client database.

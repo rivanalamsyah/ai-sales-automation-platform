@@ -85,31 +85,146 @@ export class MarketingService {
       },
     });
 
-    // 3. Queue sending jobs in BullMQ (1-second intervals between broadcasts for rate limit protection)
+    try {
+      // 3. Queue sending jobs in BullMQ (1-second intervals between broadcasts for rate limit protection)
+      if (contacts.length > 0) {
+        const contact = contacts[0];
+        // Try queuing the first message to verify Redis connection
+        await this.campaignQueue.add(
+          'send_message',
+          {
+            organizationId,
+            campaignId: campaign.id,
+            contactId: contact.id,
+            contactPhone: contact.phone,
+            contactName: contact.name,
+            content: campaign.content,
+          },
+          {
+            delay: 0,
+            attempts: 3,
+            backoff: {
+              type: 'exponential',
+              delay: 2000,
+            },
+          },
+        );
+
+        // Queue the rest if connection check passes
+        for (let i = 1; i < contacts.length; i++) {
+          const c = contacts[i];
+          await this.campaignQueue.add(
+            'send_message',
+            {
+              organizationId,
+              campaignId: campaign.id,
+              contactId: c.id,
+              contactPhone: c.phone,
+              contactName: c.name,
+              content: campaign.content,
+            },
+            {
+              delay: i * 1000, // anti-ban pacing
+              attempts: 3,
+              backoff: {
+                type: 'exponential',
+                delay: 2000,
+              },
+            },
+          );
+        }
+      }
+      return { success: true, targetCount: contacts.length, mode: 'queue' };
+    } catch (error) {
+      console.warn('BullMQ queue connection failed. Falling back to in-memory broadcast execution:', error.message);
+      // Reset sentCount and process synchronously in background
+      await this.prisma.campaign.update({
+        where: { id: campaignId },
+        data: {
+          sentCount: 0,
+        },
+      });
+
+      this.executeInMemoryBroadcast(organizationId, campaign.id, contacts, campaign.content).catch((err) => {
+        console.error('In-memory broadcast error:', err);
+      });
+
+      return { success: true, targetCount: contacts.length, mode: 'in_memory_fallback' };
+    }
+  }
+
+  private async executeInMemoryBroadcast(
+    organizationId: string,
+    campaignId: string,
+    contacts: any[],
+    content: string,
+  ) {
+    let sentSuccess = 0;
     for (let i = 0; i < contacts.length; i++) {
       const contact = contacts[i];
-      await this.campaignQueue.add(
-        'send_message',
-        {
-          organizationId,
-          campaignId: campaign.id,
-          contactId: contact.id,
-          contactPhone: contact.phone,
-          contactName: contact.name,
-          content: campaign.content,
-        },
-        {
-          delay: i * 1000, // anti-ban pacing
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 2000,
+      
+      // Delay between dispatches (pacing)
+      if (i > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+
+      try {
+        // 1. Personalize content
+        const personalizedContent = content
+          .replace(/{{name}}/g, contact.name)
+          .replace(/{{phone}}/g, contact.phone);
+
+        // 2. Resolve/create conversation
+        let conversation = await this.prisma.conversation.findFirst({
+          where: { contactId: contact.id, organizationId },
+        });
+
+        if (!conversation) {
+          conversation = await this.prisma.conversation.create({
+            data: { contactId: contact.id, organizationId },
+          });
+        }
+
+        // 3. Send message via WhatsApp
+        await this.whatsAppService.sendMessage(organizationId, conversation.id, personalizedContent, false);
+
+        // 4. Create successful log entry
+        await this.prisma.campaignLog.create({
+          data: {
+            campaignId,
+            contactId: contact.id,
+            status: 'SENT',
           },
-        },
-      );
+        });
+
+        // 5. Update campaign running counters
+        await this.prisma.campaign.update({
+          where: { id: campaignId },
+          data: {
+            sentCount: { increment: 1 },
+          },
+        });
+        sentSuccess++;
+      } catch (err) {
+        console.error(`In-memory broadcast failure for contact ${contact.phone}:`, err.message);
+        
+        await this.prisma.campaignLog.create({
+          data: {
+            campaignId,
+            contactId: contact.id,
+            status: 'FAILED',
+            error: err.message,
+          },
+        });
+      }
     }
 
-    return { success: true, targetCount: contacts.length };
+    // Set campaign status
+    const finalStatus = sentSuccess > 0 ? CampaignStatus.COMPLETED : CampaignStatus.FAILED;
+    await this.prisma.campaign.update({
+      where: { id: campaignId },
+      data: { status: finalStatus },
+    });
   }
 }
 
