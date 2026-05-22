@@ -1,0 +1,362 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  SUPERADMIN
+  OWNER
+  ADMIN
+  AGENT
+}
+
+enum ModelProvider {
+  OPENAI
+  GEMINI
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  DOCUMENT
+  AUDIO
+  VIDEO
+}
+
+enum ConversationStatus {
+  ACTIVE
+  SNOOZED
+  RESOLVED
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  COMPLETED
+  FAILED
+}
+
+enum WorkflowRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+model User {
+  id             String          @id @default(uuid())
+  email          String          @unique
+  password       String
+  name           String
+  phone          String?
+  emailVerified  Boolean         @default(false)
+  role           Role            @default(AGENT)
+  isActive       Boolean         @default(true)
+  organizationId String?
+  organization   Organization?   @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  notes          Note[]
+  reminders      TaskReminder[]
+  auditLogs      AuditLog[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model Organization {
+  id                 String           @id @default(uuid())
+  name               String
+  slug               String           @unique
+  logo               String?
+  plan               String           @default("FREE") // FREE, GROWTH, ENTERPRISE
+  subStatus          String           @default("ACTIVE") // ACTIVE, CANCELED, PAST_DUE
+  stripeCustomerId   String?
+  stripeSubId        String?
+  midtransSubId      String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  users              User[]
+  invites            Invite[]
+  contacts           Contact[]
+  leadStages         LeadStage[]
+  tags               Tag[]
+  reminders          TaskReminder[]
+  chatbotConfig      ChatbotConfig?
+  conversations      Conversation[]
+  messages           Message[]
+  campaigns          Campaign[]
+  workflows          Workflow[]
+  workflowRuns       WorkflowRun[]
+  usageQuota         UsageQuota?
+  auditLogs          AuditLog[]
+  whatsAppConnection WhatsAppConnection?
+  baileysSession     BaileysSession?
+}
+
+model Invite {
+  id             String       @id @default(uuid())
+  email          String
+  role           Role         @default(AGENT)
+  code           String       @unique
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  status         String       @default("PENDING") // PENDING, ACCEPTED, EXPIRED
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+}
+
+model Contact {
+  id             String         @id @default(uuid())
+  name           String
+  phone          String
+  email          String?
+  leadScore      Int            @default(0)
+  stageId        String?
+  stage          LeadStage?     @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lastActivity   DateTime       @default(now())
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  tags           Tag[]          @relation("ContactTags")
+  notes          Note[]
+  reminders      TaskReminder[]
+  conversations  Conversation[]
+  workflowRuns   WorkflowRun[]
+  campaignLogs   CampaignLog[]
+
+  @@unique([organizationId, phone])
+}
+
+model LeadStage {
+  id             String       @id @default(uuid())
+  name           String
+  position       Int          @default(0)
+  color          String       @default("#888888")
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contacts       Contact[]
+}
+
+model Tag {
+  id             String       @id @default(uuid())
+  name           String
+  color          String       @default("#888888")
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contacts       Contact[]    @relation("ContactTags")
+}
+
+model Note {
+  id        String   @id @default(uuid())
+  contactId String
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model TaskReminder {
+  id             String       @id @default(uuid())
+  contactId      String
+  contact        Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title          String
+  description    String?
+  dueAt          DateTime
+  status         String       @default("PENDING") // PENDING, COMPLETED, OVERDUE
+  createdAt      DateTime     @default(now())
+}
+
+model WhatsAppConnection {
+  id             String       @id @default(uuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  status         String       @default("DISCONNECTED") // CONNECTING, CONNECTED, DISCONNECTED
+  phoneNumber    String?
+  qrCode         String?
+  updatedAt      DateTime     @updatedAt
+}
+
+model ChatbotConfig {
+  id             String        @id @default(uuid())
+  organizationId String        @unique
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  isActive       Boolean       @default(false)
+  systemPrompt   String        @default("You are a friendly sales assistant helping with customer inquiries.")
+  temperature    Float         @default(0.7)
+  fallbackReply  String        @default("Sorry, I could not understand that. A human representative will be with you shortly.")
+  modelProvider  ModelProvider @default(GEMINI)
+  modelName      String        @default("gemini-1.5-flash")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model Conversation {
+  id             String             @id @default(uuid())
+  contactId      String
+  contact        Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  status         ConversationStatus @default(ACTIVE)
+  isBotActive    Boolean            @default(true)
+  unreadCount    Int                @default(0)
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lastMessageAt  DateTime           @default(now())
+  messages       Message[]
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           MessageRole
+  type           MessageType  @default(TEXT)
+  content        String
+  mediaUrl       String?
+  isRead         Boolean      @default(false)
+  isAI           Boolean      @default(false)
+  isHandoff      Boolean      @default(false)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  timestamp      DateTime     @default(now())
+}
+
+model Campaign {
+  id             String         @id @default(uuid())
+  name           String
+  status         CampaignStatus @default(DRAFT)
+  content        String
+  mediaUrl       String?
+  scheduledAt    DateTime?
+  sentCount      Int            @default(0)
+  readCount      Int            @default(0)
+  clickCount     Int            @default(0)
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  logs           CampaignLog[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model CampaignLog {
+  id        String   @id @default(uuid())
+  campaignId String
+  campaign  Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contactId String
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  status    String   @default("PENDING") // PENDING, SENT, DELIVERED, READ, FAILED
+  error     String?
+  createdAt DateTime @default(now())
+}
+
+model Workflow {
+  id             String         @id @default(uuid())
+  name           String
+  description    String?
+  isActive       Boolean        @default(false)
+  triggerType    String // INCOMING_MESSAGE, TAG_ADDED, STAGE_CHANGED
+  triggerConfig  String? // json config as string
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  nodes          WorkflowNode[]
+  edges          WorkflowEdge[]
+  runs           WorkflowRun[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model WorkflowNode {
+  id         String   @id @default(uuid())
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  type       String // TRIGGER, ACTION_SEND, ACTION_AI, ACTION_DELAY, ACTION_WEBHOOK
+  label      String
+  positionX  Float
+  positionY  Float
+  config     String   @default("{}") // JSON string config
+}
+
+model WorkflowEdge {
+  id            String   @id @default(uuid())
+  workflowId    String
+  workflow      Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  sourceNodeId  String
+  targetNodeId  String
+}
+
+model WorkflowRun {
+  id             String            @id @default(uuid())
+  workflowId     String
+  workflow       Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  contactId      String
+  contact        Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  status         WorkflowRunStatus @default(RUNNING)
+  logs           String            @default("[]") // JSON string log lines
+  createdAt      DateTime          @default(now())
+}
+
+model UsageQuota {
+  id                    String       @id @default(uuid())
+  organizationId        String       @unique
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  messagesSentThisMonth Int          @default(0)
+  messageLimit          Int          @default(1000)
+  contactsCreated       Int          @default(0)
+  contactLimit          Int          @default(250)
+  workflowsCount        Int          @default(0)
+  workflowLimit         Int          @default(5)
+  billingCycleStart     DateTime     @default(now())
+}
+
+model AuditLog {
+  id             String       @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action         String // LOGIN, CREATE_CONTACT, SEND_CAMPAIGN, UPDATE_WORKFLOW
+  details        String
+  ipAddress      String?
+  createdAt      DateTime     @default(now())
+}
+
+model SystemMetric {
+  id         String   @id @default(uuid())
+  cpuUsage   Float
+  ramUsage   Float
+  activeConns Int
+  timestamp  DateTime @default(now())
+}
+
+model AIContentTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  category    String // HOOK, SALES_SCRIPT, AD_COPY, CTA
+  description String
+  prompt      String
+}
+
+model BaileysSession {
+  id             String       @id @default(uuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  creds          String       // JSON serialized credentials
+  keys           String       @default("{}") // JSON serialized keys map
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+

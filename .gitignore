@@ -1,0 +1,26 @@
+# Root gitignore to protect monorepo environments
+node_modules/
+dist/
+.next/
+out/
+build/
+*.log
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Database / Prisma
+/backend/prisma/migrations/
+/backend/prisma/*.db
+/backend/prisma/*.db-journal
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Multer Uploads dir
+/backend/uploads/*
+!/backend/uploads/.gitkeep
